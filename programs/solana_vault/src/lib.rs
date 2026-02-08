@@ -18,6 +18,10 @@ pub mod solana_vault {
     pub fn withdraw(ctx: Context<Withdraw>, amount: u64) -> Result<()> {
         ctx.accounts.withdraw(amount)
     }
+
+    pub fn close(ctx: Context<Close>) -> Result<()> {
+        ctx.accounts.close()
+    }
 }
 
 #[derive(Accounts)]
@@ -138,6 +142,55 @@ impl<'info> Withdraw<'info> {
         Ok(())
     }
 }
+
+#[derive(Accounts)]
+pub struct Close<'info> {
+    #[account(mut)]
+    pub user: Signer<'info>,
+
+    #[account(
+        mut,
+        seeds = [b"state", user.key().as_ref()],
+        bump = vault_state.state_bump,
+        close = user
+    )]
+    pub vault_state: Account<'info, VaultState>,
+
+    #[account(
+        mut,
+        seeds = [b"vault", vault_state.key().as_ref()],
+        bump = vault_state.vault_bump
+    )]
+    pub vault: SystemAccount<'info>,
+    pub system_program: Program<'info, System>
+}
+
+impl<'info> Close<'info> {
+    pub fn close(&mut self) -> Result<()> {
+        let vault_lamports = self.vault.lamports();
+
+        let vault_state_key = self.vault_state.key();
+        let seeds = &[
+            b"vault".as_ref(),
+            vault_state_key.as_ref(),
+            &[self.vault_state.vault_bump]
+        ];
+        let signer = &[&seeds[..]];
+
+        let cpi_program = self.system_program.to_account_info();
+        let cpi_accounts = Transfer {
+            from: self.vault.to_account_info(),
+            to: self.user.to_account_info()
+        };
+
+        let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
+        
+        transfer(cpi_ctx, vault_lamports)?;
+        Ok(())
+    }
+}
+
+
 
 #[derive(InitSpace)]
 #[account]
